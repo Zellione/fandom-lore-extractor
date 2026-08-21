@@ -272,3 +272,45 @@ def test_build_client_passes_through(monkeypatch):
     monkeypatch.setattr("openai.OpenAI", FakeSDKClient)
     build_client(base_url="http://local:11434/v1", api_key="sk-test")
     assert captured == {"base_url": "http://local:11434/v1", "api_key": "sk-test"}
+
+
+def test_build_client_local_server_injects_dummy_key(monkeypatch):
+    captured = {}
+
+    class FakeSDKClient:
+        def __init__(self, base_url=None, api_key=None):
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+
+    monkeypatch.setattr("openai.OpenAI", FakeSDKClient)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    build_client(base_url="http://localhost:1234/v1", api_key=None)
+    assert captured == {"base_url": "http://localhost:1234/v1", "api_key": "NO-KEY-PROVIDED"}
+
+
+def test_build_client_openai_no_key_does_not_inject(monkeypatch):
+    captured = {}
+
+    class FakeSDKClient:
+        def __init__(self, base_url=None, api_key=None):
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+
+    monkeypatch.setattr("openai.OpenAI", FakeSDKClient)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    build_client(base_url=None, api_key=None)
+    assert captured == {"base_url": None, "api_key": None}
+
+
+def test_build_client_env_key_not_overridden(monkeypatch):
+    captured = {}
+
+    class FakeSDKClient:
+        def __init__(self, base_url=None, api_key=None):
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+
+    monkeypatch.setattr("openai.OpenAI", FakeSDKClient)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    build_client(base_url="http://localhost:1234/v1", api_key=None)
+    assert captured == {"base_url": "http://localhost:1234/v1", "api_key": None}

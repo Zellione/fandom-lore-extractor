@@ -14,6 +14,7 @@ Two prompt strategies are supported:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -187,8 +188,17 @@ def build_client(base_url: Optional[str] = None, api_key: Optional[str] = None) 
 
     ``None`` values fall back to the ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY``
     environment variables handled by the SDK, so explicit CLI flags always win.
+
+    Local endpoints (a custom ``base_url``) usually skip authentication, but the
+    SDK refuses to construct a client without *some* key. In that case — and only
+    then — a placeholder ``NO-KEY-PROVIDED`` key is used so the request still
+    goes through. Requests to the real OpenAI API without any key still fail
+    with the SDK's normal missing-credentials error.
     """
     from openai import OpenAI
+
+    if api_key is None and base_url is not None and not os.environ.get("OPENAI_API_KEY"):
+        api_key = "NO-KEY-PROVIDED"
 
     return OpenAI(base_url=base_url, api_key=api_key)
 
