@@ -342,6 +342,15 @@ dependencies = [
 - **Rate limits**: Built-in 1 req/sec + retry with backoff.
 - **Unicode/special chars**: Proper URL encoding for API requests.
 - **Ambiguous links**: Recorded in the decision file, not force-resolved.
+- **Crawler dedup**: Every page is fetched exactly once (a `queued_set` prevents a link
+  from being enqueued twice). With no `--max-pages`/`--depth`, the crawl keeps going
+  only as long as it discovers new pages, then terminates when the wiki is exhausted.
+- **Domain containment**: Only local article (namespace 0) links are queued. Links with
+  interwiki/namespace prefixes (e.g. `w:`, `en:`, `Category:`, `Template:`, `Special:`)
+  are never followed, so the crawl never leaves the wiki.
+- **Entity filter does not stop discovery**: `--entities` affects which entities are
+  kept in output, but every visited page's links are still expanded so the full wiki
+  graph is explored (needed for accurate relationship inference).
 
 ---
 

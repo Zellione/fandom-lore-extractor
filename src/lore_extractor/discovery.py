@@ -105,31 +105,35 @@ class Crawler:
             result.visited = list(visited)
             queue: List[Tuple[str, int]] = [(t, 0) for t in queued]
             depth_of: Dict[str, int] = {t: 0 for t in queued}
+            queued_set: Set[str] = set(queued)
         else:
             queue = []
             depth_of = {}
+            queued_set = set()
 
             def seed(title: str, _depth: int = 0) -> None:
-                queue.append((title, _depth))
-                depth_of[title] = _depth
+                if title not in visited_set and title not in queued_set:
+                    queue.append((title, _depth))
+                    depth_of[title] = _depth
+                    queued_set.add(title)
 
             if self.category:
                 for member in self.client.get_category_members(self.category):
-                    if member not in visited_set:
-                        seed(member)
+                    seed(member)
             if self.entrypoint:
                 seed(self.entrypoint)
 
         cap = self.max_pages if self.max_pages else float("inf")
-        with tqdm(total=min(len(queue), int(cap)) if self.max_pages else None,
-                  desc="Crawling", unit="page", disable=None) as pbar:
+        with tqdm(disable=None) as pbar:
+            pbar.set_description("Crawling")
             while queue:
                 if len(visited_set) >= cap:
                     break
                 title, depth = queue.pop(0)
-
+                # Only count truly-unique pages toward the cap / progress.
                 if title in visited_set:
                     continue
+
                 if _is_skippable_title(title):
                     result.skipped.append(title)
                     continue
@@ -144,6 +148,7 @@ class Crawler:
                     result.visited.append(title)
                     visited_set.add(title)
                     pbar.update(1)
+                    self._save_state(result.visited, [t for t, _ in queue])
                     continue
 
                 result.visited.append(title)
@@ -152,6 +157,7 @@ class Crawler:
 
                 if page is None:
                     result.not_found.append(title)
+                    self._save_state(result.visited, [t for t, _ in queue])
                     continue
 
                 parsed = parse_wikitext(page["wikitext"], title=page["title"])
@@ -165,21 +171,48 @@ class Crawler:
                     page["links"],
                 )
 
-                if self.entities_filter and classification.entity_type not in self.entities_filter:
-                    continue
-
-                result.entities.append(entity)
+                # The entity-type filter only affects OUTPUT, not discovery:
+                # links from every page (even filtered-out types) still expand
+                # the crawl so the wiki is fully explored.
+                if not (self.entities_filter and classification.entity_type not in self.entities_filter):
+                    result.entities.append(entity)
 
                 if self.max_depth is None or depth + 1 <= self.max_depth:
                     for link in entity.raw_links:
-                        if link in visited_set or link in result.skipped or _is_skippable_title(link):
+                        if (
+                            link in visited_set
+                            or link in queued_set
+                            or link in result.skipped
+                            or _is_skippable_title(link)
+                            or not self._is_local_link(link)
+                        ):
                             continue
                         nd = depth_of.get(link)
                         if nd is None or nd > depth + 1:
                             nd = depth + 1
                             depth_of[link] = nd
                             queue.append((link, nd))
+                            queued_set.add(link)
 
                 self._save_state(result.visited, [t for t, _ in queue])
 
         return result
+
+    @staticmethod
+    def _is_local_link(title: str) -> bool:
+        """Return True if a title is a same-wiki article link.
+
+        MediaWiki namespace-0 links are already local. Any title carrying an
+        interwiki/namespace ``:`` prefix (e.g. ``w:``, ``en:``, ``Category:``,
+        ``Template:``, ``Special:``) is treated as non-local and skipped so the
+        crawl never leaves the wiki domain.
+        """
+        if ":" in title:
+            prefix = title.split(":", 1)[0]
+            if prefix and prefix.lower() in {
+                "w", "wikipedia", "en", "de", "es", "fr", "ru", "zh", "id",
+                "category", "template", "file", "image", "special", "help",
+                "talk", "user", "project", "portal",
+            }:
+                return False
+        return True
