@@ -136,3 +136,87 @@ def test_unmatched_links_counted():
     run_inference([a], log, res)
     assert res.unmatched == 1
     assert log.entries == []
+
+
+def test_update_resolution_and_rerun_applies_it():
+    a = _c("Akame", raw_links=["Wave"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    log = DecisionLog()
+    res = InferenceResult()
+    run_inference([a, w1, w2], log, res)
+    assert a.relationships == []
+    assert len(log.unresolved_entries()) == 1
+
+    log.update_resolution(log.unresolved_entries()[0], "Wave (Technique)")
+    res2 = InferenceResult()
+    run_inference([a, w1, w2], log, res2)
+    assert "Wave (Technique)" in a.relationships
+    assert "Wave" not in a.relationships
+    assert log.unresolved_entries() == []
+
+
+def test_rerun_inference_after_resolution_is_idempotent():
+    a = _c("Akame", raw_links=["Wave"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    log = DecisionLog()
+    res = InferenceResult()
+    run_inference([a, w1, w2], log, res)
+    log.update_resolution(log.unresolved_entries()[0], "Wave")
+    res2 = InferenceResult()
+    run_inference([a, w1, w2], log, res2)
+    run_inference([a, w1, w2], log, InferenceResult())
+    assert a.relationships.count("Wave") == 1
+
+
+def test_pre_resolved_ambiguity_applied_from_file(tmp_path):
+    p = tmp_path / "ambiguous_links.json"
+    log1 = DecisionLog()
+    a = _c("Akame", raw_links=["Wave"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    run_inference([a, w1, w2], log1, InferenceResult())
+    assert a.relationships == []
+    log1.update_resolution(log1.unresolved_entries()[0], "Wave")
+    log1.write(p)
+
+    log2 = DecisionLog(decisions_path=p)
+    assert log2.unresolved_entries() == []
+    res = InferenceResult()
+    run_inference([a, w1, w2], log2, res)
+    assert "Wave" in a.relationships
+    assert res.ambiguous_skipped == 0
+
+
+def test_resolved_ambiguity_not_relogged_when_loaded(tmp_path):
+    p = tmp_path / "ambiguous_links.json"
+    log1 = DecisionLog()
+    a = _c("Akame", raw_links=["Wave"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    run_inference([a, w1, w2], log1, InferenceResult())
+    log1.update_resolution(log1.unresolved_entries()[0], "Wave (Technique)")
+    log1.write(p)
+
+    log2 = DecisionLog(decisions_path=p)
+    run_inference([a, w1, w2], log2, InferenceResult())
+    assert log2.unresolved_entries() == []
+
+
+def test_generic_resolution_applied_from_file(tmp_path):
+    from lore_extractor.models import GenericPage
+
+    p = tmp_path / "ambiguous_links.json"
+    g = GenericPage(name="Timeline", raw_links=["Wave"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    log1 = DecisionLog()
+    run_inference([g, w1, w2], log1, InferenceResult())
+    log1.update_resolution(log1.unresolved_entries()[0], "Wave (Technique)")
+    log1.write(p)
+
+    log2 = DecisionLog(decisions_path=p)
+    run_inference([g, w1, w2], log2, InferenceResult())
+    assert "Wave (Technique)" in g.related["related_character"]
+

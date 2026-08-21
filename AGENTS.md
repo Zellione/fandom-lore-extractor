@@ -19,6 +19,7 @@ pytest tests/test_parser.py -k infobox
 
 ## Entrypoints
 - CLI script: `lore-extractor --wiki <domain> --entrypoint <page>`
+- `lore-extractor resolve --wiki <domain>` — review/resolve saved decisions **without** re-crawling.
 - Module: `python -m lore_extractor` (same CLI)
 
 ## Architecture (src/lore_extractor/)
@@ -41,6 +42,13 @@ Pipeline order matters:
 
 ## Decisions / ambiguity
 Ambiguous or low-confidence relationships are **not silently guessed**. They are logged to `{output}/{wiki}/decisions/ambiguous_links.json` for manual review.
+
+Resolution workflows (see `resolvers.py`, `cli.py`):
+- `--resolve-decisions` on a crawl run — prompts interactively *after* inference, then re-runs inference to apply the choices.
+- `lore-extractor resolve` — load/`--decisions` or locate by `--wiki`/`--output`, review without re-crawling.
+- `--decisions PATH` — point inference at a decisions file (default: `<output>/<wiki>/decisions/ambiguous_links.json`). **Previously resolved decisions are auto-applied** on every run; only new ambiguities are logged.
+- `InteractiveResolver` prompts: `[1-N]` pick, `[a]` auto (highest confidence), `[s]` skip, `[q]` quit.
+- `DecisionLog.update_resolution` / `try_resolve` / `unresolved_entries` drive the flow; inference re-runs are idempotent because `_add_link` guards list duplicates.
 
 ## Tooling
 No linting, formatting, or type-checking is currently enforced.

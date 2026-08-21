@@ -148,14 +148,51 @@ class DecisionLog:
     Occurrences with the same ambiguity signature (link text + candidate set)
     are grouped into a single entry that tracks every affected source page and
     a running occurrence count, so reviewers decide once per unique ambiguity.
+
+    Previously saved resolutions can be loaded from a decisions file and are
+    auto-applied during inference; unresolved entries can be resolved
+    interactively (see :mod:`lore_extractor.resolvers`).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, decisions_path: Optional[Path] = None) -> None:
         self._entries: Dict[str, Dict[str, Any]] = {}
+        self._resolutions: Dict[str, str] = {}
+        if decisions_path is not None:
+            self.load(decisions_path)
 
     def _key(self, link_text: str, candidates: List[Dict[str, Any]]) -> str:
         names = sorted(c["name"] for c in candidates)
         return json.dumps({"link_text": link_text, "candidates": names}, sort_keys=True)
+
+    def load(self, path: Path) -> int:
+        """Load previously saved decisions from ``path``. Returns entries loaded."""
+        if not path.exists():
+            return 0
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return 0
+        for entry in data:
+            link_text = entry.get("link_text", "")
+            candidates = entry.get("candidates", [])
+            key = entry.get("key") or self._key(link_text, candidates)
+            entry["key"] = key
+            self._entries[key] = entry
+            if entry.get("resolved") and entry.get("resolution"):
+                self._resolutions[key] = entry["resolution"]
+        return len(data)
+
+    def try_resolve(
+        self, link_text: str, candidates: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Return a candidate if a prior resolution exists for this ambiguity."""
+        chosen = self._resolutions.get(self._key(link_text, candidates))
+        if chosen is None:
+            return None
+        for candidate in candidates:
+            if candidate["name"] == chosen:
+                return candidate
+        return None
 
     def add(
         self,
@@ -168,6 +205,7 @@ class DecisionLog:
         entry = self._entries.get(key)
         if entry is None:
             entry = {
+                "key": key,
                 "link_text": link_text,
                 "candidates": candidates,
                 "sources": [],
@@ -180,6 +218,17 @@ class DecisionLog:
         if source not in entry["sources"]:
             entry["sources"].append(source)
         entry["occurrence_count"] += 1
+
+    def update_resolution(self, entry: Dict[str, Any], chosen_name: str) -> None:
+        """Mark ``entry`` as resolved to ``chosen_name`` (one of its candidates)."""
+        key = entry["key"]
+        entry["resolved"] = True
+        entry["resolution"] = chosen_name
+        entry["resolved_at"] = datetime.now(timezone.utc).isoformat()
+        self._resolutions[key] = chosen_name
+
+    def unresolved_entries(self) -> List[Dict[str, Any]]:
+        return [e for e in self._entries.values() if not e["resolved"]]
 
     @property
     def entries(self) -> List[Dict[str, Any]]:
@@ -275,19 +324,22 @@ def _run_for_entity(
         if not eligible and candidates:
             eligible = candidates
         if len(eligible) > 1 or len(candidates) > 1:
-            decision_log.add(
-                ent.name,
-                raw,
-                [
-                    {"name": c["name"], "type": c["type"], "confidence": round(getattr(c["entity"], "confidence", 0.0), 2)}
-                    for c in candidates
-                ],
-                reason="multiple_candidates",
-            )
-            result.ambiguous_skipped += 1
-            continue
-
-        target = eligible[0]
+            resolved = decision_log.try_resolve(raw, candidates)
+            if resolved is None:
+                decision_log.add(
+                    ent.name,
+                    raw,
+                    [
+                        {"name": c["name"], "type": c["type"], "confidence": round(getattr(c["entity"], "confidence", 0.0), 2)}
+                        for c in candidates
+                    ],
+                    reason="multiple_candidates",
+                )
+                result.ambiguous_skipped += 1
+                continue
+            target = resolved
+        else:
+            target = eligible[0]
         target_entity = target["entity"]
         section_title = link_to_section.get(key)
         field = resolve_field(ent.entity_type, ent.name, target["type"], section_title)
@@ -313,15 +365,19 @@ def _run_for_generic(
             result.unmatched += 1
             continue
         if len(candidates) > 1:
-            decision_log.add(
-                ent.name,
-                raw,
-                [{"name": c["name"], "type": c["type"], "confidence": round(getattr(c["entity"], "confidence", 0.0), 2)} for c in candidates],
-                reason="multiple_candidates",
-            )
-            result.ambiguous_skipped += 1
-            continue
-        target = candidates[0]
+            resolved = decision_log.try_resolve(raw, candidates)
+            if resolved is None:
+                decision_log.add(
+                    ent.name,
+                    raw,
+                    [{"name": c["name"], "type": c["type"], "confidence": round(getattr(c["entity"], "confidence", 0.0), 2)} for c in candidates],
+                    reason="multiple_candidates",
+                )
+                result.ambiguous_skipped += 1
+                continue
+            target = resolved
+        else:
+            target = candidates[0]
         bucket = f"related_{target['type']}"
         if bucket not in ent.related:
             ent.related[bucket] = []
