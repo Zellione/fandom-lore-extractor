@@ -12,6 +12,7 @@ from lore_extractor.discovery import Crawler
 from lore_extractor.formatters.json import write_json_files
 from lore_extractor.formatters.markdown import write_markdown_files
 from lore_extractor.inference import DecisionLog, InferenceResult, run_inference
+from lore_extractor.llm_resolver import LLMResolver, build_client, resolve_model
 from lore_extractor.resolvers import InteractiveResolver
 
 VALID_ENTITY_TYPES = ["character", "location", "item", "organization", "creature", "lore", "generic"]
@@ -77,6 +78,19 @@ def _default_decisions_path(output: Path, wiki: str) -> Path:
 @click.option("--resolve-decisions", "resolve_interactive", is_flag=True, default=False,
               help="Interactively resolve ambiguous links after inference instead "
                    "of only logging them")
+@click.option("--use-llm", is_flag=True, default=False,
+              help="Use an OpenAI-compatible endpoint to resolve ambiguous links")
+@click.option("--llm-url", "llm_url", type=str, default=None,
+              help="Base URL of the OpenAI-compatible endpoint "
+                   "(overrides OPENAI_BASE_URL)")
+@click.option("--llm-model", "llm_model", type=str, default=None,
+              help="Model to use (overrides auto-discovery from the endpoint)")
+@click.option("--llm-key", "llm_key", type=str, default=None,
+              help="API key (overrides OPENAI_API_KEY)")
+@click.option("--llm-single-prompt", is_flag=True, default=False,
+              help="Send one prompt per ambiguity instead of one batched prompt")
+@click.option("--llm-temperature", type=float, default=0.0, show_default=True,
+              help="Sampling temperature for the LLM")
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -96,6 +110,12 @@ def main(
     rate: float,
     decisions: Optional[Path],
     resolve_interactive: bool,
+    use_llm: bool,
+    llm_url: Optional[str],
+    llm_model: Optional[str],
+    llm_key: Optional[str],
+    llm_single_prompt: bool,
+    llm_temperature: float,
 ) -> None:
     """Extract character, lore, location, item, organization and creature data
     from a Fandom wiki via the MediaWiki API.
@@ -122,6 +142,12 @@ def main(
         rate=rate,
         decisions=decisions,
         resolve_interactive=resolve_interactive,
+        use_llm=use_llm,
+        llm_url=llm_url,
+        llm_model=llm_model,
+        llm_key=llm_key,
+        llm_single_prompt=llm_single_prompt,
+        llm_temperature=llm_temperature,
     )
 
 
@@ -142,6 +168,12 @@ def _run_extract(
     rate: float,
     decisions: Optional[Path],
     resolve_interactive: bool,
+    use_llm: bool = False,
+    llm_url: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_key: Optional[str] = None,
+    llm_single_prompt: bool = False,
+    llm_temperature: float = 0.0,
 ) -> None:
     if not wiki:
         raise click.UsageError("--wiki is required.")
@@ -176,7 +208,24 @@ def _run_extract(
     result = InferenceResult()
     run_inference(entities, decision_log, result, confidence_threshold=confidence)
 
-    if resolve_interactive and decision_log.unresolved_entries():
+    if use_llm and decision_log.unresolved_entries():
+        click.echo("\nResolving ambiguous links with LLM ...")
+        resolved = _run_llm_resolver(
+            output,
+            wiki,
+            decision_log,
+            llm_url=llm_url,
+            llm_model=llm_model,
+            llm_key=llm_key,
+            single_prompt=llm_single_prompt,
+            temperature=llm_temperature,
+        )
+        if resolved:
+            # Re-run inference so the newly resolved ambiguities are applied.
+            # Relationship fields are idempotent, so nothing is duplicated.
+            result = InferenceResult()
+            run_inference(entities, decision_log, result, confidence_threshold=confidence)
+    elif resolve_interactive and decision_log.unresolved_entries():
         click.echo("\nResolving ambiguous links ...")
         resolved = InteractiveResolver(decision_log).run()
         if resolved:
@@ -217,11 +266,35 @@ def _run_extract(
 @click.option("--decisions", "decisions", type=click.Path(path_type=Path), default=None,
               help="Path to a saved decisions/ambiguous_links.json file "
                    "(default: <output>/<wiki>/decisions/ambiguous_links.json)")
-def resolve(wiki: Optional[str], output: Path, decisions: Optional[Path]) -> None:
-    """Interactively resolve ambiguous links from a saved decisions file.
+@click.option("--use-llm", is_flag=True, default=False,
+              help="Use an OpenAI-compatible endpoint to resolve ambiguous links")
+@click.option("--llm-url", "llm_url", type=str, default=None,
+              help="Base URL of the OpenAI-compatible endpoint "
+                   "(overrides OPENAI_BASE_URL)")
+@click.option("--llm-model", "llm_model", type=str, default=None,
+              help="Model to use (overrides auto-discovery from the endpoint)")
+@click.option("--llm-key", "llm_key", type=str, default=None,
+              help="API key (overrides OPENAI_API_KEY)")
+@click.option("--llm-single-prompt", is_flag=True, default=False,
+              help="Send one prompt per ambiguity instead of one batched prompt")
+@click.option("--llm-temperature", type=float, default=0.0, show_default=True,
+              help="Sampling temperature for the LLM")
+def resolve(
+    wiki: Optional[str],
+    output: Path,
+    decisions: Optional[Path],
+    use_llm: bool = False,
+    llm_url: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_key: Optional[str] = None,
+    llm_single_prompt: bool = False,
+    llm_temperature: float = 0.0,
+) -> None:
+    """Resolve ambiguous links from a saved decisions file.
 
     Choices are written back to the file; the next extraction run applies them
-    automatically.
+    automatically. Use ``--use-llm`` to resolve via an OpenAI-compatible
+    endpoint instead of interactively.
     """
     if decisions is None:
         if not wiki:
@@ -233,12 +306,56 @@ def resolve(wiki: Optional[str], output: Path, decisions: Optional[Path]) -> Non
         raise click.UsageError(f"Decisions file not found: {decisions}")
 
     decision_log = DecisionLog(decisions_path=decisions)
-    n = InteractiveResolver(decision_log).run()
+    if use_llm:
+        n = _run_llm_resolver(
+            output,
+            wiki or decisions.parent.parent.parent.name,
+            decision_log,
+            llm_url=llm_url,
+            llm_model=llm_model,
+            llm_key=llm_key,
+            single_prompt=llm_single_prompt,
+            temperature=llm_temperature,
+        )
+    else:
+        click.echo("\nResolving ambiguous links interactively ...")
+        n = InteractiveResolver(decision_log).run()
     decision_log.write(decisions)
     if n:
         click.echo(f"Resolved {n} ambiguity(ies); saved to {decisions}.")
     else:
         click.echo("No decisions changed.")
+
+
+def _run_llm_resolver(
+    output: Path,
+    wiki: str,
+    decision_log: DecisionLog,
+    llm_url: Optional[str],
+    llm_model: Optional[str],
+    llm_key: Optional[str],
+    single_prompt: bool,
+    temperature: float,
+) -> int:
+    """Resolve ambiguities with an OpenAI-compatible endpoint.
+
+    Returns the number of ambiguities resolved. Reasoning/error output is
+    written to ``<output>/<wiki>/decisions/llm_reasoning.json``.
+    """
+    client = build_client(base_url=llm_url, api_key=llm_key)
+    model = resolve_model(client, llm_model)
+    resolver = LLMResolver(
+        decision_log,
+        client=client,
+        model=model,
+        single_prompt=single_prompt,
+        temperature=temperature,
+    )
+    n = resolver.run()
+    reasoning_path = output / wiki / "decisions" / "llm_reasoning.json"
+    resolver.write_reasoning(reasoning_path)
+    click.echo(f"LLM reasoning log: {reasoning_path}")
+    return n
 
 
 def _print_report(

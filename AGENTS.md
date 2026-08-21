@@ -50,5 +50,15 @@ Resolution workflows (see `resolvers.py`, `cli.py`):
 - `InteractiveResolver` prompts: `[1-N]` pick, `[a]` auto (highest confidence), `[s]` skip, `[q]` quit.
 - `DecisionLog.update_resolution` / `try_resolve` / `unresolved_entries` drive the flow; inference re-runs are idempotent because `_add_link` guards list duplicates.
 
+## LLM resolution (`--use-llm`)
+Resolves ambiguities via an OpenAI-compatible endpoint (`llm_resolver.py`) instead of prompting; works on both a crawl run and `lore-extractor resolve`.
+- Flags: `--use-llm`, `--llm-url`, `--llm-model`, `--llm-key`, `--llm-single-prompt`, `--llm-temperature` (default `0.0`).
+- Precedence: explicit CLI flags > env vars (`OPENAI_BASE_URL`, `OPENAI_API_KEY`) > SDK defaults.
+- Model selection: if `--llm-model` is omitted, the endpoint's model list is consulted — a single model auto-selected; multiple models raise an error listing them.
+- Prompt strategy: **batched** by default (all unresolved entries in one call); `--llm-single-prompt` sends one call per ambiguity.
+- Invalid/unknown candidate picks are re-prompted up to **3 times**; if it still fails, the entry is skipped and logged as an error.
+- Reasoning: each choice's `reasoning` string (and any failures) is written to `{output}/{wiki}/decisions/llm_reasoning.json`.
+- LLM tests mock the client (`tests/test_llm_resolver.py`); no live API calls.
+
 ## Tooling
 No linting, formatting, or type-checking is currently enforced.
