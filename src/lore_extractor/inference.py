@@ -143,10 +143,19 @@ REVERSE_RULES: Dict[Tuple[str, str], Tuple[str, str]] = {
 
 
 class DecisionLog:
-    """Collects ambiguous/unresolved link occurrences for later review."""
+    """Collects ambiguous/unresolved link occurrences for later review.
+
+    Occurrences with the same ambiguity signature (link text + candidate set)
+    are grouped into a single entry that tracks every affected source page and
+    a running occurrence count, so reviewers decide once per unique ambiguity.
+    """
 
     def __init__(self) -> None:
-        self.entries: List[Dict[str, Any]] = []
+        self._entries: Dict[str, Dict[str, Any]] = {}
+
+    def _key(self, link_text: str, candidates: List[Dict[str, Any]]) -> str:
+        names = sorted(c["name"] for c in candidates)
+        return json.dumps({"link_text": link_text, "candidates": names}, sort_keys=True)
 
     def add(
         self,
@@ -155,16 +164,26 @@ class DecisionLog:
         candidates: List[Dict[str, Any]],
         reason: str = "multiple_candidates",
     ) -> None:
-        self.entries.append(
-            {
-                "source": source,
+        key = self._key(link_text, candidates)
+        entry = self._entries.get(key)
+        if entry is None:
+            entry = {
                 "link_text": link_text,
                 "candidates": candidates,
+                "sources": [],
+                "occurrence_count": 0,
                 "resolved": False,
                 "reason": reason,
                 "recorded_at": datetime.now(timezone.utc).isoformat(),
             }
-        )
+            self._entries[key] = entry
+        if source not in entry["sources"]:
+            entry["sources"].append(source)
+        entry["occurrence_count"] += 1
+
+    @property
+    def entries(self) -> List[Dict[str, Any]]:
+        return list(self._entries.values())
 
     def write(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,7 +259,7 @@ def _run_for_entity(
         for link in links:
             link_to_section.setdefault(normalize_name(link), section_title)
 
-    for raw in list(ent.raw_links):
+    for raw in dict.fromkeys(ent.raw_links):
         key = normalize_name(raw)
         candidates = index.get(key, [])
         # Skip self-links
@@ -288,7 +307,7 @@ def _run_for_generic(
 ) -> None:
     from lore_extractor.models import EntityModel as E
 
-    for raw in list(ent.raw_links):
+    for raw in dict.fromkeys(ent.raw_links):
         candidates = [c for c in index.get(normalize_name(raw), []) if c["name"] != ent.name]
         if not candidates:
             result.unmatched += 1

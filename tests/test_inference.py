@@ -71,10 +71,52 @@ def test_ambiguous_links_logged_not_resolved():
     run_inference([a, w1, w2], log, res)
     assert a.relationships == []  # not resolved
     assert len(log.entries) == 1
-    assert log.entries[0]["source"] == "Akame"
     assert log.entries[0]["link_text"] == "Wave"
+    assert log.entries[0]["sources"] == ["Akame"]
+    assert log.entries[0]["occurrence_count"] == 1
     assert log.entries[0]["resolved"] is False
     assert len(log.entries[0]["candidates"]) == 2
+
+
+def test_ambiguous_links_grouped_across_sources():
+    a = _c("Akame", raw_links=["Wave"])
+    k = _c("Kurome", raw_links=["Wave"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    log = DecisionLog()
+    res = InferenceResult()
+    run_inference([a, k, w1, w2], log, res)
+    assert len(log.entries) == 1
+    entry = log.entries[0]
+    assert entry["link_text"] == "Wave"
+    assert set(entry["sources"]) == {"Akame", "Kurome"}
+    assert entry["occurrence_count"] == 2
+
+
+def test_duplicate_raw_links_deduplicated_per_entity():
+    a = _c("Akame", raw_links=["Wave", "Wave"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    log = DecisionLog()
+    res = InferenceResult()
+    run_inference([a, w1, w2], log, res)
+    assert len(log.entries) == 1
+    assert log.entries[0]["sources"] == ["Akame"]
+    assert log.entries[0]["occurrence_count"] == 1
+
+
+def test_distinct_ambiguities_stay_separate():
+    a = _c("Akame", raw_links=["Wave", "Mine"])
+    w1 = _c("Wave")
+    w2 = _c("Wave (Technique)")
+    m1 = _c("Mine")
+    m2 = _c("Mine (Technique)")
+    log = DecisionLog()
+    res = InferenceResult()
+    run_inference([a, w1, w2, m1, m2], log, res)
+    assert len(log.entries) == 2
+    texts = {e["link_text"] for e in log.entries}
+    assert texts == {"Wave", "Mine"}
 
 
 def test_self_links_skipped():
