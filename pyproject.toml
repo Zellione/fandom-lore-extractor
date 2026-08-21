@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lore-extractor"
+version = "0.1.0"
+description = "Extract character, lore, location, item, organization, and creature data from Fandom wikis via the MediaWiki API"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "UNLICENSED" }
+authors = [{ name = "lore-extractor" }]
+dependencies = [
+    "requests>=2.31.0",
+    "mwparserfromhell>=0.6.5",
+    "pydantic>=2.5.0",
+    "click>=8.1.0",
+    "tenacity>=8.2.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "responses>=0.25.0",
+]
+
+[project.scripts]
+lore-extractor = "lore_extractor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
