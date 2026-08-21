@@ -108,19 +108,21 @@ def main(
     result = InferenceResult()
     run_inference(entities, decision_log, result, confidence_threshold=confidence)
 
-    # Write output
-    output.mkdir(parents=True, exist_ok=True)
+    # Write output, nested under a per-wiki subfolder so multiple extractions
+    # can coexist in the same base output directory.
+    wiki_output = output / wiki
+    wiki_output.mkdir(parents=True, exist_ok=True)
     organize = not flat_output
     if "json" in formats:
         write_json_files(
-            entities, output, wiki, len(crawl_result.visited),
+            entities, wiki_output, wiki, len(crawl_result.visited),
             keep_links=keep_links, organize=organize,
         )
     if "markdown" in formats:
-        write_markdown_files(entities, output, organize=organize)
+        write_markdown_files(entities, wiki_output, organize=organize)
 
     # Decision file (ambiguous links + unknown classifications)
-    decision_path = output / "decisions" / "ambiguous_links.json"
+    decision_path = wiki_output / "decisions" / "ambiguous_links.json"
     decision_log.write(decision_path)
 
     if report:
@@ -128,7 +130,7 @@ def main(
 
     click.echo(
         f"Done. {len(crawl_result.visited)} pages crawled, "
-        f"{len(entities)} entities extracted -> {output}"
+        f"{len(entities)} entities extracted -> {wiki_output}"
     )
 
 

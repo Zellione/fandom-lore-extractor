@@ -45,7 +45,11 @@ Options:
 
 ## Output
 
-- `out/wiki_data.json` — combined structured data
-- `out/pages/*.json` — one JSON file per page
-- `out/pages/*.md` — one Markdown file per page
-- `out/decisions/ambiguous_links.json` — ambiguous relationship links for manual review
+Output is written under a subfolder named after the wiki domain, so multiple
+extractions can coexist in the same base directory. With `--output ./out` and
+`--wiki akamegakill.fandom.com`:
+
+- `out/akamegakill.fandom.com/wiki_data.json` — combined structured data
+- `out/akamegakill.fandom.com/pages/*.json` — one JSON file per page
+- `out/akamegakill.fandom.com/pages/*.md` — one Markdown file per page
+- `out/akamegakill.fandom.com/decisions/ambiguous_links.json` — ambiguous relationship links for manual review

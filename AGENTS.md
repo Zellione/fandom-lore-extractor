@@ -40,7 +40,7 @@ Pipeline order matters:
 - Without `--keep-links`, raw internal links are stripped from output.
 
 ## Decisions / ambiguity
-Ambiguous or low-confidence relationships are **not silently guessed**. They are logged to `{output}/decisions/ambiguous_links.json` for manual review.
+Ambiguous or low-confidence relationships are **not silently guessed**. They are logged to `{output}/{wiki}/decisions/ambiguous_links.json` for manual review.
 
 ## Tooling
 No linting, formatting, or type-checking is currently enforced.
