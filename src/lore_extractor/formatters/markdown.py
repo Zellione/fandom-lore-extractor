@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 
+from lore_extractor.formatters import ENTITY_DIRS
 from lore_extractor.models import (
     Character,
     Creature,
@@ -118,12 +119,15 @@ def render_markdown(entity: EntityModel) -> str:
     return "\n".join(lines)
 
 
-def write_markdown_files(entities: List[EntityModel], output_dir: Path) -> None:
+def write_markdown_files(entities: List[EntityModel], output_dir: Path, organize: bool = True) -> None:
     pages_dir = output_dir / "pages"
-    pages_dir.mkdir(parents=True, exist_ok=True)
     for ent in entities:
+        dest = pages_dir
+        if organize:
+            dest = pages_dir / ENTITY_DIRS.get(ent.entity_type, "generic")
+        dest.mkdir(parents=True, exist_ok=True)
         safe = _safe_filename(ent.name)
-        (pages_dir / f"{safe}.md").write_text(
+        (dest / f"{safe}.md").write_text(
             render_markdown(ent) + "\n", encoding="utf-8"
         )
 

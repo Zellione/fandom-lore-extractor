@@ -54,6 +54,9 @@ def _parse_formats(raw: str) -> List[str]:
               help="Min confidence to auto-accept a relationship")
 @click.option("--keep-links", is_flag=True, default=False,
               help="Keep raw internal links in each page's output")
+@click.option("--flat-output", "--no-organize", "flat_output", is_flag=True, default=False,
+              help="Write all per-page files flat into pages/ instead of "
+                   "organizing them into entity-type subdirectories")
 @click.option("--resume", type=click.Path(path_type=Path), default=None,
               help="Resume from a saved crawl state file")
 @click.option("--report", is_flag=True, default=False, help="Print a summary report")
@@ -70,6 +73,7 @@ def main(
     entity_filter: Optional[str],
     confidence: float,
     keep_links: bool,
+    flat_output: bool,
     resume: Optional[Path],
     report: bool,
     rate: float,
@@ -106,12 +110,14 @@ def main(
 
     # Write output
     output.mkdir(parents=True, exist_ok=True)
+    organize = not flat_output
     if "json" in formats:
         write_json_files(
-            entities, output, wiki, len(crawl_result.visited), keep_links=keep_links
+            entities, output, wiki, len(crawl_result.visited),
+            keep_links=keep_links, organize=organize,
         )
     if "markdown" in formats:
-        write_markdown_files(entities, output)
+        write_markdown_files(entities, output, organize=organize)
 
     # Decision file (ambiguous links + unknown classifications)
     decision_path = output / "decisions" / "ambiguous_links.json"

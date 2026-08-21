@@ -124,7 +124,7 @@ class Crawler:
                 seed(self.entrypoint)
 
         cap = self.max_pages if self.max_pages else float("inf")
-        with tqdm(disable=None) as pbar:
+        with tqdm(unit="page", disable=None) as pbar:
             pbar.set_description("Crawling")
             while queue:
                 if len(visited_set) >= cap:

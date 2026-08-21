@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
+from lore_extractor.formatters import ENTITY_DIRS
 from lore_extractor.models import EntityModel
 
 
@@ -37,13 +38,17 @@ def write_json_files(
     wiki: str,
     pages_crawled: int,
     keep_links: bool = False,
+    organize: bool = True,
 ) -> None:
     """Write per-page JSON files and a combined wiki_data.json."""
     pages_dir = output_dir / "pages"
-    pages_dir.mkdir(parents=True, exist_ok=True)
     for ent in entities:
+        dest = pages_dir
+        if organize:
+            dest = pages_dir / ENTITY_DIRS.get(ent.entity_type, "generic")
+        dest.mkdir(parents=True, exist_ok=True)
         safe = _safe_filename(ent.name)
-        (pages_dir / f"{safe}.json").write_text(
+        (dest / f"{safe}.json").write_text(
             json.dumps(ent.to_dict(keep_links=keep_links), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
