@@ -12,7 +12,12 @@ from lore_extractor.discovery import Crawler
 from lore_extractor.formatters.json import write_json_files
 from lore_extractor.formatters.markdown import write_markdown_files
 from lore_extractor.inference import DecisionLog, InferenceResult, run_inference
-from lore_extractor.llm_resolver import LLMResolver, build_client, resolve_model
+from lore_extractor.llm_resolver import (
+    LLMResolver,
+    build_client,
+    resolve_model,
+    validate_llm_connection,
+)
 from lore_extractor.resolvers import InteractiveResolver
 
 VALID_ENTITY_TYPES = ["character", "location", "item", "organization", "creature", "lore", "generic"]
@@ -182,6 +187,9 @@ def _run_extract(
             "Provide at least one of --entrypoint, --category, or --resume."
         )
 
+    if use_llm:
+        validate_llm_connection(base_url=llm_url, model=llm_model, api_key=llm_key)
+
     formats = _parse_formats(fmt)
     entity_types = _parse_entity_types(entity_filter)
     decisions_file = decisions or _default_decisions_path(output, wiki)
@@ -304,6 +312,9 @@ def resolve(
         decisions = _default_decisions_path(output, wiki)
     if not decisions.exists():
         raise click.UsageError(f"Decisions file not found: {decisions}")
+
+    if use_llm:
+        validate_llm_connection(base_url=llm_url, model=llm_model, api_key=llm_key)
 
     decision_log = DecisionLog(decisions_path=decisions)
     if use_llm:

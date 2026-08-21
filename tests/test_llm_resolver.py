@@ -11,6 +11,7 @@ from lore_extractor.llm_resolver import (
     _extract_json,
     build_client,
     resolve_model,
+    validate_llm_connection,
 )
 from lore_extractor.models import Character
 
@@ -127,6 +128,59 @@ def test_resolve_model_empty_requires_flag():
     client = FakeClient(model_ids=[])
     with pytest.raises(click.UsageError) as excinfo:
         resolve_model(client, None)
+    assert "--llm-model" in str(excinfo.value)
+
+
+def test_validate_llm_connection_explicit_model_pings(monkeypatch):
+    captured = {}
+
+    def fake_build(base_url=None, api_key=None):
+        captured["base_url"] = base_url
+        captured["api_key"] = api_key
+        return FakeClient(model_ids=["test-model"])
+
+    monkeypatch.setattr("lore_extractor.llm_resolver.build_client", fake_build)
+    name = validate_llm_connection(
+        base_url="http://local:11434/v1", model="test-model", api_key="sk-test"
+    )
+    assert name == "test-model"
+    assert captured == {"base_url": "http://local:11434/v1", "api_key": "sk-test"}
+
+
+def test_validate_llm_connection_endpoint_unreachable(monkeypatch):
+    class Boom:
+        def list(self, **kwargs):
+            raise RuntimeError("connection refused")
+
+    client = FakeClient()
+    setattr(client, "models", Boom())
+    monkeypatch.setattr(
+        "lore_extractor.llm_resolver.build_client",
+        lambda base_url=None, api_key=None: client,
+    )
+    with pytest.raises(click.UsageError) as excinfo:
+        validate_llm_connection(model="test-model")
+    assert "unreachable" in str(excinfo.value)
+    assert "connection refused" in str(excinfo.value)
+
+
+def test_validate_llm_connection_auto_selects_model(monkeypatch):
+    client = FakeClient(model_ids=["mistral-7b"])
+    monkeypatch.setattr(
+        "lore_extractor.llm_resolver.build_client",
+        lambda base_url=None, api_key=None: client,
+    )
+    assert validate_llm_connection() == "mistral-7b"
+
+
+def test_validate_llm_connection_propagates_model_errors(monkeypatch):
+    client = FakeClient(model_ids=["a", "b"])
+    monkeypatch.setattr(
+        "lore_extractor.llm_resolver.build_client",
+        lambda base_url=None, api_key=None: client,
+    )
+    with pytest.raises(click.UsageError) as excinfo:
+        validate_llm_connection()
     assert "--llm-model" in str(excinfo.value)
 
 

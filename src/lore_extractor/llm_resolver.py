@@ -203,6 +203,30 @@ def build_client(base_url: Optional[str] = None, api_key: Optional[str] = None) 
     return OpenAI(base_url=base_url, api_key=api_key)
 
 
+def validate_llm_connection(
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> str:
+    """Verify the LLM endpoint is reachable and select a model.
+
+    Intended to be called early in a workflow so a misconfigured endpoint fails
+    fast, before any expensive work (e.g. crawling the wiki). Builds the client
+    and contacts the endpoint's model list; an explicit ``model`` is returned
+    as-is after a connectivity ping, otherwise :func:`resolve_model` selects
+    one. Raises ``click.UsageError`` if the endpoint is unreachable or no model
+    can be determined.
+    """
+    client = build_client(base_url=base_url, api_key=api_key)
+    if model:
+        try:
+            client.models.list()
+        except Exception as exc:
+            raise click.UsageError(f"LLM endpoint unreachable: {exc}") from exc
+        return model
+    return resolve_model(client, None)
+
+
 def resolve_model(client: Any, model_name: Optional[str]) -> str:
     """Return the model to use.
 

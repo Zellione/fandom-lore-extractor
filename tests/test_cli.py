@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import click
 from click.testing import CliRunner
 
 from lore_extractor.cli import main
@@ -66,6 +67,30 @@ def test_extract_requires_wiki(tmp_path):
     assert "--wiki is required" in result.output
 
 
+def test_extract_with_llm_validates_before_crawling(tmp_path, monkeypatch):
+    wiki_client_built = []
+
+    def fake_wiki_client(wiki, rate_per_sec=1.0):
+        wiki_client_built.append(wiki)
+        raise AssertionError("WikiClient should not be built when validation fails")
+
+    monkeypatch.setattr("lore_extractor.cli.WikiClient", fake_wiki_client)
+
+    def boom_validate(base_url=None, model=None, api_key=None):
+        raise click.UsageError("LLM endpoint unreachable: boom")
+
+    monkeypatch.setattr("lore_extractor.cli.validate_llm_connection", boom_validate)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["--wiki", "akamegakill.fandom.com", "--entrypoint", "Akame", "--use-llm"],
+    )
+    assert result.exit_code != 0
+    assert "unreachable" in result.output
+    assert wiki_client_built == []
+
+
 class _FakeCompletions:
     def __init__(self, content):
         self.content = content
@@ -91,6 +116,10 @@ def _monkeypatch_llm(monkeypatch):
     monkeypatch.setattr(
         "lore_extractor.cli.resolve_model",
         lambda client, model: "test-model",
+    )
+    monkeypatch.setattr(
+        "lore_extractor.cli.validate_llm_connection",
+        lambda base_url=None, model=None, api_key=None: "test-model",
     )
 
 
